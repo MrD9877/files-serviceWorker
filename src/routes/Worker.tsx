@@ -12,6 +12,7 @@ const SW_OBJ: { SW: null | ServiceWorker; init: () => void; unregister: () => vo
           SW_OBJ.SW = registered.installing || registered.waiting || registered.active;
           console.log("service worker is registered");
         });
+
       // 2. See if the page is currently has a service worker.
       if (navigator.serviceWorker.controller) {
         console.log("we have a service worker installed");
