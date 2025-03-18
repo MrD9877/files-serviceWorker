@@ -169,24 +169,41 @@ Read textfile
 
 register and manupulate worker
 
-project\
+```
+project
 |
 |/src
 |/sw.js
+```
 
 ```js
-const SW_OBJ: { SW: null | ServiceWorker; init: () => void; unregister: () => void } = {
+export const SW_OBJ: {
+  SW: null | ServiceWorker;
+  init: () => void;
+  unregister: () => void;
+  getStorageSpace: () => Promise<
+    | {
+        quota?: number;
+        usage?: number;
+      }
+    | undefined
+  >;
+  onMessage: (ev: MessageEvent<unknown>) => void;
+  sendMessage: (msg: unknown) => Promise<void>;
+} = {
   SW: null,
   init: () => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
         .register("/sw.js", {
           scope: "/",
+          type: "module",
         })
         .then((registered) => {
           SW_OBJ.SW = registered.installing || registered.waiting || registered.active;
           console.log("service worker is registered");
         });
+
       // 2. See if the page is currently has a service worker.
       if (navigator.serviceWorker.controller) {
         console.log("we have a service worker installed");
@@ -197,6 +214,12 @@ const SW_OBJ: { SW: null | ServiceWorker; init: () => void; unregister: () => vo
       navigator.serviceWorker.oncontrollerchange = () => {
         console.log("New service worker activated");
       };
+
+      navigator.serviceWorker.addEventListener("controllerchange", async () => {
+        SW_OBJ.SW = navigator.serviceWorker.controller;
+      });
+      //listen for messages from the service worker
+      navigator.serviceWorker.addEventListener("message", SW_OBJ.onMessage);
     } else {
       console.log("service worker is not supported");
     }
@@ -211,25 +234,68 @@ const SW_OBJ: { SW: null | ServiceWorker; init: () => void; unregister: () => vo
       });
     }
   },
+  getStorageSpace: async () => {
+    if ("storage" in navigator) {
+      const storage = await navigator.storage.estimate();
+      return storage;
+    }
+  },
+  sendMessage: async (msg) => {
+    //send some structured-cloneable data from the webpage to the sw
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(msg);
+    }
+  },
+  onMessage: async ({ data }) => {
+    //got a message from the service worker
+    alert(data);
+  },
 };
 
 ```
 
 ## SW.js
 
-```js
-//our service worker
-console.log("sw running");
-//new
+> [!tip]
+> Use `ev.clientId` in '`fetch`' eventListner
+> use ` ev.source.id` in '`message`' eventListner
 
-//console.log({ self });
+```js
+import BrowserCaches from "./src/utilty/BrowserCaches";
+const url = "/vite.svg";
+
+function code() {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      console.log("teja");
+      resolve();
+    }, 2000);
+  });
+}
+
+const handleSave = async () => {
+  const cache = await caches.open("test");
+  const isSaved = await cache.match(url);
+  if (!isSaved) {
+    await cache.add(url);
+  }
+};
+
 self.addEventListener("install", (ev) => {
   //service worker is installed.
+  ev.waitUntil(handleSave());
+  self.skipWaiting(); //skip waiting to activate
   console.log("installed");
 });
+
 self.addEventListener("activate", (ev) => {
   //service worker is activated
   console.log("activated");
+
+  clients.claim().then(() => {
+    //claim means that the html file will use this new service worker.
+    console.log("the service worker has now claimed all pages so they use the new service worker.");
+  });
 });
 
 self.addEventListener("fetch", (ev) => {
@@ -240,5 +306,152 @@ self.addEventListener("fetch", (ev) => {
 self.addEventListener("message", (ev) => {
   //message from webpage
 });
-//
+```
+
+### WaitUntil
+
+the `ExtendableEvent.waitUntil()` method extends the lifetime of the event./
+
+If you don't call it inside a method, the service worker could be `stopped at any time` (see the specification)./
+
+So, the waitUntil method is used to tell the browser not to terminate the service worker until the promise passed to waitUntil is either resolved or rejected./
+
+In the case of the `install` and the `activate` events, it delays the state switch of the service worker to installed and activated/
+
+```js
+ev.waitUntil(code()); // ev.waitUntil(Promise) if async function call it
+```
+
+### SkipWaiting() && Claim()
+
+skipWaiting() /
+
+A service worker is activated after it is installed, and if there is no other service worker that is currently controlling pages within the scope. In other words, if you have any number of tabs open for a page that is being controlled by the old service worker, then the new service worker will not activate. You can therefore activate the new service worker by closing all open tabs. After this, the old service worker is controlling zero pages, and so the new service worker can become active./
+
+Claim()/
+
+serviceWorker will claim all existing tabs from old service worker.
+
+```js
+self.addEventListener("install", (ev) => {
+  self.skipWaiting(); //skip waiting to activate
+});
+
+self.addEventListener("activate", (ev) => {
+  clients.claim().then(() => {
+    console.log("the service worker has now claimed all pages so they use the new service worker.");
+  });
+});
+```
+
+### respondwith()
+
+Intercept fetch call and respond with any '`Response`'.
+
+> [!CAUTION]
+> Do not forget to clone response before returning in case of fetch
+
+```js
+self.addEventListener("fetch", (ev) => {
+  if (ev.request.url.startsWith("ws://")) { /// stop from interfering with localhost vite server
+    console.log("not stoping");
+  } else {
+    ev.respondWith(
+      (async () => {
+        const res: Response = await handleRequest(ev);
+        return res;
+      })()
+    );
+  }
+});
+```
+
+```js
+async function handleRequest(ev: FetchEvent) {
+  const cacheRes = await caches.match(ev.request);// check for caches or to fetch
+  return cacheRes || (await fetchAndSaveInCaches(ev.request));
+}
+```
+
+> [!CAUTION]
+> Do not forget to cors the request if needed.
+> Do not forget to set credentials if needed.
+
+```js
+  let cachesName = "default";
+const fetchAndSaveInCaches = async (req: Request) => {
+  const opts: RequestInit = {
+    cache: "no-cache",
+    mode: "cors",
+  };
+  // check if reqest is being made outside the origin
+  if (!req.url.startsWith(location.origin)) {
+    opts.mode = "cors";
+    opts.credentials = "omit";
+  }
+
+ try {
+    const response = await fetch(req, opts);
+    if (response && response.headers.has("content-type")) {
+      const contentType = response.headers.get("content-type") || "";
+      cachesName = contentType.match(/^text\/css/is) ? "css" : cachesName;
+      cachesName = contentType === "text/javascript" ? "javascript" : cachesName;
+      cachesName = contentType === "text/html" ? "html" : cachesName;
+      cachesName = contentType === "text/css" ? "css" : cachesName;
+    }
+
+    const cache = await caches.open(cachesName);
+    await cache.put(req, response.clone());
+    return response;
+  } catch {
+    const cacheRes = await caches.match("/");
+    return cacheRes;
+  }
+};
+```
+
+## ServiceWorer Send And receive message
+
+```js
+self.addEventListener("message", (ev) => {
+  //message from webpage
+  const data = ev.data;
+  if (ev.source && "id" in ev.source) {
+    const clientId = ev.source.id;
+    console.log(`from worker msg received : ${data} from id ${clientId}`);
+    ev.waitUntil(sendMessage(data, clientId));
+  }
+});
+
+const sendMessage = async (msg: string, clientId: string) => {
+  if (clientId) {
+    const client = await clients.get(clientId);
+    if (client) return client.postMessage(`${clientId} thanks for msg:${msg}`);
+  }
+};
+```
+
+# Window
+
+## Open new Tab && SendMessage
+
+```js
+ openTab: () => {
+    const wn = window.open("/");
+    if (wn) SW_OBJ.WN = wn;
+  },
+  sendMessageToTab: (msg: string) => {
+    console.log(SW_OBJ.WN);
+    if (SW_OBJ.WN) {
+      SW_OBJ.WN.postMessage(msg);
+    }
+  },
+```
+
+## GetMessage
+
+```js
+  window.addEventListener("message", (e: MessageEvent<unknown>) => {
+    console.log(e.data)}
+    )
 ```

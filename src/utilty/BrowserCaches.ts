@@ -3,19 +3,23 @@ class BrowserCaches {
   constructor(name: string) {
     this.name = name;
   }
-  async add() {
+  async add(url: string) {
     const cache = await caches.open(this.name);
-    const isSaved = await cache.match("/loadingGIF.gif");
+    const isSaved = await cache.match(url);
     if (!isSaved) {
-      await cache.add("/loadingGIF.gif");
+      await cache.add(url);
     }
   }
-  async delete() {
+  async delete(url: string) {
     const cache = await caches.open(this.name);
-    const isSaved = await cache.match("/loadingGIF.gif");
+    const isSaved = await cache.match(url);
     if (isSaved) {
-      await cache.delete("/loadingGIF.gif");
+      await cache.delete(url);
     }
+  }
+  async match(url: string) {
+    const b = await caches.match(url);
+    console.log(b);
   }
 }
 
