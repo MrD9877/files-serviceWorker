@@ -12,6 +12,8 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.0.14",
     "@tanstack/react-router": "^1.114.22",
+    "jspdf": "^3.0.1",
+    "pdfjs-dist": "^5.0.375",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.3.0",

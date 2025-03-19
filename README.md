@@ -261,6 +261,9 @@ export const SW_OBJ: {
 > use ` ev.source.id` in '`message`' eventListner
 
 ```js
+export default null;
+declare const self: ServiceWorkerGlobalScope;
+declare const clients: Clients;
 import BrowserCaches from "./src/utilty/BrowserCaches";
 const url = "/vite.svg";
 
